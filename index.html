@@ -1,101 +1,124 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>SCARA 로봇 시뮬레이션</title>
-
-    <style>
-        /* 전체 배경 설정 */
-        body {
-            background: #111;
-            color: white;
-            text-align: center;
-        }
-
-        /* 캔버스 배경 */
-        canvas {
-            background: #222;
-            margin-top: 20px;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>SCARA UI Style</title>
+<style>
+    body { margin: 0; background: #0a0f1c; }
+</style>
 </head>
-
 <body>
 
-<h1>SCARA 로봇 시뮬레이션</h1>
-
-<!-- 로봇을 그릴 공간 -->
-<canvas id="robot" width="400" height="400"></canvas>
-
-<br><br>
-
-<!-- 좌표 입력 -->
-<input id="x" placeholder="x 좌표">
-<input id="y" placeholder="y 좌표">
-
-<br><br>
-
-<!-- 버튼 클릭 시 move 함수 실행 -->
-<button onclick="move()">움직이기</button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <script>
-// =========================
-// 1. 캔버스 준비
-// =========================
-let canvas = document.getElementById("robot");
-let ctx = canvas.getContext("2d");
+// ======================
+// 기본 설정
+// ======================
+const scene = new THREE.Scene();
 
-// =========================
-// 2. 로봇(선) 그리는 함수
-// =========================
-function draw(x, y) {
+const camera = new THREE.PerspectiveCamera(
+    75, window.innerWidth/window.innerHeight, 0.1, 1000
+);
 
-    // 이전 그림 삭제 (안 하면 계속 겹쳐짐)
-    ctx.clearRect(0, 0, 400, 400);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
 
-    // 중심 좌표 (로봇 시작 위치)
-    let cx = 200;
-    let cy = 200;
+// ======================
+// 카메라
+// ======================
+camera.position.set(0, 6, 10);
+camera.lookAt(0, 0, 0);
 
-    // 선 스타일 설정
-    ctx.strokeStyle = "white"; // 색상
-    ctx.lineWidth = 3;         // 두께
+// ======================
+// 조명 (UI 느낌 핵심🔥)
+// ======================
+const light = new THREE.PointLight(0x00aaff, 1);
+light.position.set(5, 10, 5);
+scene.add(light);
 
-    // 선 그리기 시작
-    ctx.beginPath();
+const ambient = new THREE.AmbientLight(0x222244);
+scene.add(ambient);
 
-    // 시작점 (중심)
-    ctx.moveTo(cx, cy);
+// ======================
+// 바닥 (어두운 UI)
+// ======================
+const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20),
+    new THREE.MeshPhongMaterial({ color: 0x111827 })
+);
+floor.rotation.x = Math.PI / 2;
+scene.add(floor);
 
-    // 끝점 (입력 좌표만큼 이동)
-    ctx.lineTo(cx + x, cy + y);
+// ======================
+// 베이스
+// ======================
+const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(1, 1, 1),
+    new THREE.MeshPhongMaterial({ color: 0x1f2937 })
+);
+scene.add(base);
 
-    // 실제로 화면에 그림
-    ctx.stroke();
+// ======================
+// 팔 1 (파란 라인 느낌)
+// ======================
+const arm1 = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 0.4, 0.4),
+    new THREE.MeshPhongMaterial({
+        color: 0x0ea5e9,
+        emissive: 0x0ea5e9,
+        emissiveIntensity: 0.5
+    })
+);
+
+arm1.position.x = 2;
+base.add(arm1);
+
+// ======================
+// 팔 2
+// ======================
+const arm2 = new THREE.Mesh(
+    new THREE.BoxGeometry(3, 0.3, 0.3),
+    new THREE.MeshPhongMaterial({
+        color: 0x38bdf8,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 0.6
+    })
+);
+
+arm2.position.x = 3.5;
+arm1.add(arm2);
+
+// ======================
+// 끝단 (툴)
+// ======================
+const tool = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3),
+    new THREE.MeshPhongMaterial({ color: 0xffffff })
+);
+
+tool.position.x = 2;
+arm2.add(tool);
+
+// ======================
+// 애니메이션
+// ======================
+let t = 0;
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    t += 0.01;
+
+    // 부드러운 움직임
+    base.rotation.y = Math.sin(t) * 1.5;
+    arm1.rotation.y = Math.cos(t) * 1.0;
+
+    renderer.render(scene, camera);
 }
 
-// =========================
-// 3. 버튼 눌렀을 때 실행되는 함수
-// =========================
-function move() {
-
-    // 입력값 가져오기
-    let x = parseInt(document.getElementById("x").value) || 0;
-    let y = parseInt(document.getElementById("y").value) || 0;
-
-    // NaN 방지 → 값 없으면 0으로 처리
-
-    // 로봇 그리기
-    draw(x, y);
-
-    // 🔥 나중에 여기에 서버 연결 코드 추가
-    // fetch(`/move?x=${x}&y=${y}`);
-}
-
-// =========================
-// 4. 처음 실행 시 기본 그림
-// =========================
-draw(50, 0);
+animate();
 
 </script>
 
