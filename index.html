@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>SCARA 로봇 시뮬레이션</title>
+
+    <style>
+        /* 전체 배경 설정 */
+        body {
+            background: #111;
+            color: white;
+            text-align: center;
+        }
+
+        /* 캔버스 배경 */
+        canvas {
+            background: #222;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>SCARA 로봇 시뮬레이션</h1>
+
+<!-- 로봇을 그릴 공간 -->
+<canvas id="robot" width="400" height="400"></canvas>
+
+<br><br>
+
+<!-- 좌표 입력 -->
+<input id="x" placeholder="x 좌표">
+<input id="y" placeholder="y 좌표">
+
+<br><br>
+
+<!-- 버튼 클릭 시 move 함수 실행 -->
+<button onclick="move()">움직이기</button>
+
+<script>
+// =========================
+// 1. 캔버스 준비
+// =========================
+let canvas = document.getElementById("robot");
+let ctx = canvas.getContext("2d");
+
+// =========================
+// 2. 로봇(선) 그리는 함수
+// =========================
+function draw(x, y) {
+
+    // 이전 그림 삭제 (안 하면 계속 겹쳐짐)
+    ctx.clearRect(0, 0, 400, 400);
+
+    // 중심 좌표 (로봇 시작 위치)
+    let cx = 200;
+    let cy = 200;
+
+    // 선 스타일 설정
+    ctx.strokeStyle = "white"; // 색상
+    ctx.lineWidth = 3;         // 두께
+
+    // 선 그리기 시작
+    ctx.beginPath();
+
+    // 시작점 (중심)
+    ctx.moveTo(cx, cy);
+
+    // 끝점 (입력 좌표만큼 이동)
+    ctx.lineTo(cx + x, cy + y);
+
+    // 실제로 화면에 그림
+    ctx.stroke();
+}
+
+// =========================
+// 3. 버튼 눌렀을 때 실행되는 함수
+// =========================
+function move() {
+
+    // 입력값 가져오기
+    let x = parseInt(document.getElementById("x").value) || 0;
+    let y = parseInt(document.getElementById("y").value) || 0;
+
+    // NaN 방지 → 값 없으면 0으로 처리
+
+    // 로봇 그리기
+    draw(x, y);
+
+    // 🔥 나중에 여기에 서버 연결 코드 추가
+    // fetch(`/move?x=${x}&y=${y}`);
+}
+
+// =========================
+// 4. 처음 실행 시 기본 그림
+// =========================
+draw(50, 0);
+
+</script>
+
+</body>
+</html>
