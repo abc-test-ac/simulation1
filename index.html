@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SCARA Robot 3D</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; color: #cdd; font-family: 'Courier New', monospace; overflow: hidden; height: 100vh; width: 100vw; }
+    canvas { display: block; }
+
+    #ui {
+      position: fixed; top: 16px; left: 16px;
+      background: rgba(10,10,20,0.9);
+      border: 1px solid rgba(80,140,255,0.35);
+      border-radius: 10px; padding: 14px 16px; min-width: 210px;
+      backdrop-filter: blur(8px);
+    }
+    #ui h2 { font-size: 12px; color: #88aaff; letter-spacing: 0.15em; margin-bottom: 14px; border-bottom: 1px solid rgba(80,140,255,0.2); padding-bottom: 8px; }
+    .ctrl { margin-bottom: 11px; }
+    .ctrl-label { display: flex; justify-content: space-between; font-size: 11px; color: #889; margin-bottom: 4px; }
+    .ctrl-label span:last-child { color: #aac; }
+    input[type=range] { width: 100%; accent-color: #4466ff; cursor: pointer; }
+    .btn { width: 100%; margin-top: 5px; padding: 7px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 11px; cursor: pointer; letter-spacing: 0.08em; transition: all 0.2s; }
+    #animBtn { background: rgba(80,140,255,0.15); border: 1px solid rgba(80,140,255,0.45); color: #88aaff; }
+    #animBtn.active { background: rgba(255,160,60,0.15); border-color: rgba(255,160,60,0.5); color: #ffaa44; }
+    #resetBtn { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); color: #778; }
+    #info { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #445; letter-spacing: 0.1em; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <h2>SCARA ROBOT 3D</h2>
+  <div class="ctrl">
+    <div class="ctrl-label"><span>관절 1 (상완)</span><span id="j1v">0°</span></div>
+    <input type="range" id="j1" min="-150" max="150" value="0">
+  </div>
+  <div class="ctrl">
+    <div class="ctrl-label"><span>관절 2 (전완)</span><span id="j2v">-90°</span></div>
+    <input type="range" id="j2" min="-150" max="150" value="-90">
+  </div>
+  <div class="ctrl">
+    <div class="ctrl-label"><span>Z축 (상하)</span><span id="j3v">0</span></div>
+    <input type="range" id="j3" min="-30" max="30" value="0">
+  </div>
+  <button class="btn" id="animBtn">▶ 애니메이션</button>
+  <button class="btn" id="resetBtn">↺ 리셋</button>
+</div>
+
+<div id="info">드래그: 시점 회전 &nbsp;|&nbsp; 스크롤: 줌</div>
+
+<script>
+// ── Three.js를 동적으로 로드한 뒤 메인 코드 실행 ──
+// CDN이 막혀 있을 경우를 대비해 onload 콜백 방식 사용
+const script = document.createElement('script');
+script.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+script.onload = initScene;   // 로드 완료 후 씬 초기화
+script.onerror = () => {
+  document.body.innerHTML += '<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#f66;font-family:monospace;text-align:center">Three.js 로드 실패<br>인터넷 연결을 확인하세요</div>';
+};
+document.head.appendChild(script);
+
+function initScene() {
+
+  // ════════════════════════════════
+  // 1. 렌더러
+  // ════════════════════════════════
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.setClearColor(0x0a0a0f, 1);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  // ════════════════════════════════
+  // 2. 씬 & 카메라
+  // ════════════════════════════════
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x0a0a0f, 0.028);
+
+  const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 500);
+
+  window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+
+  // ════════════════════════════════
+  // 3. 조명
+  // ════════════════════════════════
+  // 전체 환경광 (약한 파란 톤)
+  scene.add(new THREE.AmbientLight(0x334466, 3));
+
+  // 주 방향광 (위에서 비추는 태양광)
+  const sun = new THREE.DirectionalLight(0xffffff, 3);
+  sun.position.set(8, 16, 8);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 80;
+  sun.shadow.camera.left = -20;
+  sun.shadow.camera.right = 20;
+  sun.shadow.camera.top = 20;
+  sun.shadow.camera.bottom = -20;
+  scene.add(sun);
+
+  // 파란 림라이트 (뒤에서 윤곽 강조)
+  const rim = new THREE.PointLight(0x2244ff, 4, 60);
+  rim.position.set(-12, 10, -12);
+  scene.add(rim);
+
+  // 오른쪽 보조광
+  const fill = new THREE.PointLight(0x8899cc, 2, 40);
+  fill.position.set(10, 5, 10);
+  scene.add(fill);
+
+  // ════════════════════════════════
+  // 4. 재질 (Material)
+  // ════════════════════════════════
+  const M = {
+    // 밝은 알루미늄 - 사진의 은색 암 바디
+    silver: new THREE.MeshStandardMaterial({ color: 0xd0d0d8, metalness: 0.95, roughness: 0.15 }),
+    // 어두운 조인트 하우징
+    darkMetal: new THREE.MeshStandardMaterial({ color: 0x2a2a38, metalness: 0.9, roughness: 0.3 }),
+    // 반짝이는 관절 볼
+    chrome: new THREE.MeshStandardMaterial({ color: 0x999aaa, metalness: 1.0, roughness: 0.05 }),
+    // 베이스 플레이트 (진한 회색)
+    base: new THREE.MeshStandardMaterial({ color: 0x3a3a4a, metalness: 0.8, roughness: 0.45 }),
+    // 카메라 렌즈
+    lens: new THREE.MeshStandardMaterial({ color: 0x001488, metalness: 0.1, roughness: 0.02, emissive: 0x000833 }),
+    // 파란 LED 악센트
+    led: new THREE.MeshStandardMaterial({ color: 0x4488ff, emissive: 0x2244aa, metalness: 0.3, roughness: 0.2 }),
+    // 전선/케이블
+    cable: new THREE.MeshStandardMaterial({ color: 0x0d0d18, metalness: 0.3, roughness: 0.9 }),
+    // 바닥 격자
+    floor: new THREE.MeshStandardMaterial({ color: 0x111118, metalness: 0.2, roughness: 0.95 }),
+  };
+
+  // ════════════════════════════════
+  // 5. 도형 유틸
+  // ════════════════════════════════
+  // 원기둥 생성
+  function Cyl(radiusTop, radiusBot, height, mat, segs = 20) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBot, height, segs), mat);
+    m.castShadow = true; m.receiveShadow = true;
+    return m;
+  }
+  // 박스 생성
+  function Box(w, h, d, mat) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.castShadow = true; m.receiveShadow = true;
+    return m;
+  }
+  // 구 생성
+  function Sph(r, mat) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 18), mat);
+    m.castShadow = true; return m;
+  }
+  // 부모에 추가하며 위치 지정
+  function place(parent, child, x, y, z) {
+    child.position.set(x, y, z);
+    parent.add(child);
+    return child;
+  }
+  // 구부러진 튜브 케이블 생성
+  function Cable(pts, radius, mat) {
+    const curve = new THREE.CatmullRomCurve3(pts.map(p => new THREE.Vector3(...p)));
+    return new THREE.Mesh(new THREE.TubeGeometry(curve, 30, radius, 8, false), mat);
+  }
+
+  // ════════════════════════════════
+  // 6. 바닥 & 격자
+  // ════════════════════════════════
+  // 바닥 원판
+  const floorDisk = Cyl(12, 12, 0.08, M.floor, 64);
+  floorDisk.receiveShadow = true;
+  scene.add(floorDisk);
+
+  // 격자선 (Three.js 내장)
+  const grid = new THREE.GridHelper(24, 24, 0x1c1c2e, 0x151520);
+  grid.position.y = 0.04;
+  scene.add(grid);
+
+  // ════════════════════════════════
+  // 7. 마운팅 플레이트
+  //    (사진 속 회색 직사각형 판)
+  // ════════════════════════════════
+  const mountPlate = Box(3.2, 0.18, 3.2, M.base);
+  mountPlate.position.set(0, 0.09, 0);
+  scene.add(mountPlate);
+
+  // 플레이트 모서리 볼트 4개
+  const boltMat = new THREE.MeshStandardMaterial({ color: 0x555566, metalness: 0.9, roughness: 0.2 });
+  [[-1.2, -1.2], [1.2, -1.2], [-1.2, 1.2], [1.2, 1.2]].forEach(([x, z]) => {
+    const bolt = Cyl(0.06, 0.06, 0.12, boltMat, 8);
+    bolt.position.set(x, 0.21, z);
+    scene.add(bolt);
+  });
+
+  // ════════════════════════════════
+  // 8. 로봇 계층 구조
+  //
+  //  scene
+  //   └─ baseGrp         (베이스 Y회전 없음, 고정)
+  //       └─ j1Grp       (관절1: Y축 수평 회전 = SCARA 특성)
+  //           └─ arm1    (상완 링크)
+  //               └─ j2Grp (관절2: Y축 수평 회전)
+  //                   └─ forearm (전완 링크)
+  //                       └─ endEffector (카메라/툴)
+  // ════════════════════════════════
+
+  // ── 베이스 고정부 ──
+  const baseGrp = new THREE.Group();
+  scene.add(baseGrp);
+
+  // 베이스 원통 (하단 두꺼운 부분)
+  place(baseGrp, Cyl(0.7, 0.75, 0.5, M.darkMetal), 0, 0.43, 0);
+  // 베이스 상단 좁아지는 넥
+  place(baseGrp, Cyl(0.45, 0.65, 0.35, M.darkMetal), 0, 0.85, 0);
+  // 베이스 상단 관절 하우징
+  place(baseGrp, Cyl(0.38, 0.38, 0.3, M.chrome), 0, 1.1, 0);
+
+  // ── 관절 1 그룹 (SCARA: Y축 회전 = 수평 스윙) ──
+  const j1Grp = new THREE.Group();
+  j1Grp.position.set(0, 1.1, 0);  // 베이스 상단에서 시작
+  baseGrp.add(j1Grp);
+
+  // ── 상완 링크 (Link 1) ──
+  // 사진처럼 납작하고 긴 수평 암
+  const arm1Grp = new THREE.Group();
+  j1Grp.add(arm1Grp);
+
+  // 상완 메인 바디: X방향으로 긴 납작한 박스
+  const arm1Body = Box(3.0, 0.38, 0.62, M.silver);
+  arm1Body.position.set(1.5, 0.1, 0);  // 중심에서 오른쪽으로 뻗음
+  arm1Grp.add(arm1Body);
+
+  // 상완 상면 패널 (약간 어두운 덮개)
+  const arm1Top = Box(2.85, 0.06, 0.54, M.darkMetal);
+  arm1Top.position.set(1.5, 0.31, 0);
+  arm1Grp.add(arm1Top);
+
+  // 상완 시작 관절 커버 (원통형)
+  place(arm1Grp, Cyl(0.32, 0.32, 0.42, M.darkMetal), 0, 0.1, 0);
+  // 관절 볼
+  place(arm1Grp, Sph(0.27, M.chrome), 0, 0.1, 0);
+
+  // 상완 LED 스트립 (3개 점)
+  [0.7, 1.4, 2.1].forEach(x => {
+    const led = Cyl(0.04, 0.04, 0.025, M.led, 8);
+    led.rotation.x = Math.PI / 2;
+    led.position.set(x, 0.35, 0.22);
+    arm1Grp.add(led);
+  });
+
+  // 상완 측면 케이블 슬롯
+  const slotMat = new THREE.MeshStandardMaterial({ color: 0x1a1a28, metalness: 0.6, roughness: 0.7 });
+  const slot = Box(2.4, 0.12, 0.08, slotMat);
+  slot.position.set(1.5, 0.0, 0.28);
+  arm1Grp.add(slot);
+
+  // ── 관절 2 그룹 (전완 시작점) ──
+  const j2Grp = new THREE.Group();
+  j2Grp.position.set(3.0, 0.1, 0);  // 상완 끝 (길이 3.0)
+  arm1Grp.add(j2Grp);
+
+  // 관절 2 하우징
+  place(j2Grp, Cyl(0.3, 0.3, 0.44, M.darkMetal), 0, 0, 0);
+  place(j2Grp, Sph(0.24, M.chrome), 0, 0, 0);
+
+  // ── 전완 링크 (Link 2) ──
+  const forearmGrp = new THREE.Group();
+  j2Grp.add(forearmGrp);
+
+  // 전완 메인 바디 (상완보다 약간 작음)
+  const arm2Body = Box(2.2, 0.34, 0.55, M.silver);
+  arm2Body.position.set(1.1, 0, 0);
+  forearmGrp.add(arm2Body);
+
+  // 전완 상면 패널
+  const arm2Top = Box(2.1, 0.055, 0.47, M.darkMetal);
+  arm2Top.position.set(1.1, 0.2, 0);
+  forearmGrp.add(arm2Top);
+
+  // 전완 LED
+  [0.4, 1.0, 1.6].forEach(x => {
+    const led = Cyl(0.035, 0.035, 0.025, M.led, 8);
+    led.rotation.x = Math.PI / 2;
+    led.position.set(x, 0.2, 0.21);
+    forearmGrp.add(led);
+  });
+
+  // ── 엔드 이펙터 (카메라 헤드) ──
+  const endGrp = new THREE.Group();
+  endGrp.position.set(2.2, 0, 0);  // 전완 끝
+  forearmGrp.add(endGrp);
+
+  // 카메라 마운트 박스
+  place(endGrp, Box(0.55, 0.45, 0.55, M.darkMetal), 0, 0, 0);
+
+  // Z축 스핀들 (위아래로 이동하는 축)
+  const spindleGrp = new THREE.Group();
+  endGrp.add(spindleGrp);
+
+  // 스핀들 원통
+  place(spindleGrp, Cyl(0.12, 0.12, 1.2, M.chrome), 0, -0.85, 0);
+
+  // 카메라 렌즈 (앞을 바라봄)
+  const lensBody = Cyl(0.2, 0.2, 0.14, M.darkMetal, 32);
+  lensBody.rotation.x = Math.PI / 2;
+  lensBody.position.set(0, 0, 0.32);
+  endGrp.add(lensBody);
+
+  const lens = Cyl(0.13, 0.13, 0.06, M.lens, 32);
+  lens.rotation.x = Math.PI / 2;
+  lens.position.set(0, 0, 0.4);
+  endGrp.add(lens);
+
+  const lensGlow = Cyl(0.06, 0.06, 0.02, M.led, 32);
+  lensGlow.rotation.x = Math.PI / 2;
+  lensGlow.position.set(0, 0, 0.435);
+  endGrp.add(lensGlow);
+
+  // ── 케이블 하네스 ──
+  // 베이스에서 상완을 따라 흐르는 케이블
+  const cable1 = Cable([
+    [0.1, 0.9, 0.25],
+    [0.6, 0.12, 0.28],
+    [1.5, 0.05, 0.27],
+    [2.6, 0.08, 0.25],
+  ], 0.035, M.cable);
+  arm1Grp.add(cable1);
+
+  // 전완 케이블
+  const cable2 = Cable([
+    [0.1, 0.0, 0.24],
+    [0.8, 0.02, 0.25],
+    [1.6, 0.0, 0.23],
+    [2.1, 0.0, 0.2],
+  ], 0.03, M.cable);
+  forearmGrp.add(cable2);
+
+  // ════════════════════════════════
+  // 9. 슬라이더 UI 연결
+  // ════════════════════════════════
+  const DEF = { j1: 0, j2: -90, j3: 0 };  // 기본 포즈
+
+  const slJ1 = document.getElementById('j1');
+  const slJ2 = document.getElementById('j2');
+  const slJ3 = document.getElementById('j3');
+  const lJ1  = document.getElementById('j1v');
+  const lJ2  = document.getElementById('j2v');
+  const lJ3  = document.getElementById('j3v');
+
+  // 관절 1: Y축 회전 (수평 스윙)
+  slJ1.oninput = () => {
+    j1Grp.rotation.y = THREE.MathUtils.degToRad(+slJ1.value);
+    lJ1.textContent = slJ1.value + '°';
+  };
+  // 관절 2: Y축 회전 (전완 스윙)
+  slJ2.oninput = () => {
+    forearmGrp.rotation.y = THREE.MathUtils.degToRad(+slJ2.value);
+    lJ2.textContent = slJ2.value + '°';
+  };
+  // Z축: 스핀들 상하 이동
+  slJ3.oninput = () => {
+    spindleGrp.position.y = +slJ3.value * 0.04;
+    lJ3.textContent = slJ3.value;
+  };
+
+  // 초기 각도 적용
+  j1Grp.rotation.y    = THREE.MathUtils.degToRad(DEF.j1);
+  forearmGrp.rotation.y = THREE.MathUtils.degToRad(DEF.j2);
+
+  // ════════════════════════════════
+  // 10. 애니메이션 & 리셋
+  // ════════════════════════════════
+  let animating = false, animT = 0;
+  const animBtn = document.getElementById('animBtn');
+
+  animBtn.onclick = () => {
+    animating = !animating;
+    animBtn.textContent = animating ? '⏸ 정지' : '▶ 애니메이션';
+    animBtn.classList.toggle('active', animating);
+  };
+
+  document.getElementById('resetBtn').onclick = () => {
+    animating = false;
+    animBtn.textContent = '▶ 애니메이션';
+    animBtn.classList.remove('active');
+    slJ1.value = DEF.j1; slJ2.value = DEF.j2; slJ3.value = DEF.j3;
+    lJ1.textContent = DEF.j1 + '°'; lJ2.textContent = DEF.j2 + '°'; lJ3.textContent = DEF.j3;
+    j1Grp.rotation.y = THREE.MathUtils.degToRad(DEF.j1);
+    forearmGrp.rotation.y = THREE.MathUtils.degToRad(DEF.j2);
+    spindleGrp.position.y = 0;
+  };
+
+  // ════════════════════════════════
+  // 11. 궤도 카메라 (Orbit)
+  //     구면 좌표계: theta(수평), phi(수직), radius(거리)
+  // ════════════════════════════════
+  let isDragging = false, lx = 0, ly = 0;
+  let theta = 0.6, phi = 0.85, radius = 18;
+
+  canvas.addEventListener('mousedown', e => { isDragging = true; lx = e.clientX; ly = e.clientY; });
+  window.addEventListener('mouseup',   () => isDragging = false);
+  window.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    theta -= (e.clientX - lx) * 0.005;  // 좌우
+    phi    = Math.max(0.1, Math.min(1.45, phi - (e.clientY - ly) * 0.005));  // 상하 클램프
+    lx = e.clientX; ly = e.clientY;
+  });
+  canvas.addEventListener('wheel', e => {
+    radius = Math.max(5, Math.min(35, radius + e.deltaY * 0.02));
+  }, { passive: true });
+
+  // ════════════════════════════════
+  // 12. 렌더 루프
+  // ════════════════════════════════
+  function animate() {
+    requestAnimationFrame(animate);
+
+    if (animating) {
+      animT += 0.011;
+      // sin 파형으로 자연스러운 SCARA 동작
+      const a1 = Math.sin(animT * 0.8)        * 60;
+      const a2 = Math.sin(animT * 1.2 + 0.5)  * 70 - 45;
+      const s3 = Math.sin(animT * 1.5)        * 15;
+
+      j1Grp.rotation.y      = THREE.MathUtils.degToRad(a1);
+      forearmGrp.rotation.y = THREE.MathUtils.degToRad(a2);
+      spindleGrp.position.y = s3 * 0.04;
+
+      slJ1.value = Math.round(a1); lJ1.textContent = Math.round(a1) + '°';
+      slJ2.value = Math.round(a2); lJ2.textContent = Math.round(a2) + '°';
+      slJ3.value = Math.round(s3); lJ3.textContent = Math.round(s3);
+    }
+
+    // 구면 좌표 → 카메라 위치 변환
+    camera.position.set(
+      radius * Math.sin(theta) * Math.cos(phi),  // X
+      radius * Math.sin(phi) + 1,                 // Y (약간 위)
+      radius * Math.cos(theta) * Math.cos(phi)   // Z
+    );
+    camera.lookAt(1.5, 0.5, 0);  // 로봇 중심 (전완 방향으로 약간 오프셋)
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+}
+</script>
+</body>
+</html>
